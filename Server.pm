@@ -12,7 +12,7 @@ require Exporter;
 
 @ISA = qw(Exporter);
 @EXPORT = qw();
-$VERSION = '1.14';
+$VERSION = '1.16';
 
 my $nextid = 0;
 
