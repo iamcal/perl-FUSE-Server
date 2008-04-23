@@ -15,3 +15,6 @@ Revision history for Perl extension FUSE::Server.
 1.17  Thu Apr 25 14:24:25 2002
 	- fixed distro tar
 
+1.18 Thu Apr 25 16:06:31 2002
+	- corrected POD (new method names!)
+

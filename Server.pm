@@ -12,7 +12,7 @@ require Exporter;
 
 @ISA = qw(Exporter);
 @EXPORT = qw();
-$VERSION = '1.17';
+$VERSION = '1.18';
 
 my $nextid = 0;
 
@@ -219,7 +219,7 @@ FUSE::Server - Perl-FUSE server
       Quiet=>1,
   });
 
-  $status = $s->start();
+  $status = $s->bind();
   print "Server started: $status";
 
   $s->addCallback('BROADCASTALL',\&msg_broadcast);
@@ -228,9 +228,9 @@ FUSE::Server - Perl-FUSE server
 
   $s->defaultCallback(\&unknown_command);
 
-  $SIG{INT} = $SIG{TERM} = $SIG{HUP} = sub{$s->die();};
+  $SIG{INT} = $SIG{TERM} = $SIG{HUP} = sub{$s->stop();};
 
-  $s->run();
+  $s->start();
 
   sub msg_broadcast{
       my ($userid,$msg,$params) = @_;
