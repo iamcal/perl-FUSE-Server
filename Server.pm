@@ -12,7 +12,7 @@ require AutoLoader;
 
 @ISA = qw(Exporter AutoLoader);
 @EXPORT = qw();
-$VERSION = '1.01';
+$VERSION = '1.02';
 
 my $nextid = 0;
 
@@ -230,35 +230,54 @@ The external interface to C<FUSE::Server> is:
 
 =item $s = FUSE::Server->new( [%options] );
 
-The object constructor takes the following arguments:
+The object constructor takes the following arguments in the options hash:
 
-=item $s->start;
+B<Quiet = 0|1>
+
+Whether to be quiet. Default is to report all events to STDOUT (not 'Quiet').
+
+B<Port = n>
+
+The port for the server to listen on. Default is 1024.
+
+B<MaxClients = n>
+
+Maximum incoming connections to allow. Default is SOMAXCONN.
+
+
+=item $s->start();
 
 This method starts the server listening on it's port and returns the IP which it is listening on.
+
 
 =item $s->addCallback( $message, $coderef );
 
 This method registers the referenced subroutine as a handler for the specified message. When the server receives that message from the client, it checks it's handler hash and dispatches the decoded message to the sub. The sub should handle the following arguments:
 
-( $userid, $msg, $params )
+C<( $userid, $msg, $params )>
 
 $userid contains the internal connection id for the client session. You can use this id to associate logins with clients. The $msg parameter contains the message the client sent. This allows one routine to handle more than one message. Messages from clients are typically uppercase, with lowercase messages being reserved for internal server events, such as client connect/disconnect. The available internal messages are:
 
 B<client_start>
+
 This message is sent when a client first connects. It is typically used to issue a I<SECRET_KEY> message to the client.
 
 B<client_stop>
+
 This message is sent when a client disconnects.
+
 
 =item $s->defaultCallback( $coderef );
 
 For all messages without an assigned handler, the default handler (if set) is sent the message. If you'd like to handle all messages internally, then setup C<defaultCallback> without setting up any normal C<addCallback>'s.
 
-=item $s->die;
+
+=item $s->die();
 
 This method shuts down the server gracefully. Since the C<run> method loops, the C<die> method is generally set up to run on signal.
 
-=item $s->run;
+
+=item $s->run();
 
 This method invokes the server's internal message pump. This loop can only be broken by a signal.
 
