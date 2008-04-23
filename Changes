@@ -8,3 +8,7 @@ Revision history for Perl extension FUSE::Server.
 
 1.02  Sun May 20 14:47:39 2001
 	- fixed documentation
+
+1.14  Thu Apr 25 10:24:04 2002
+	- replaced core routines
+
