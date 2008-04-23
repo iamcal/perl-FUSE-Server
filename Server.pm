@@ -12,7 +12,7 @@ require Exporter;
 
 @ISA = qw(Exporter);
 @EXPORT = qw();
-$VERSION = '1.18';
+$VERSION = '1.19';
 
 my $nextid = 0;
 
@@ -213,13 +213,13 @@ FUSE::Server - Perl-FUSE server
 =head1 SYNOPSIS
 
   use FUSE::Server;
-  $s = FUSE::Server->new({
+  my $s = FUSE::Server->new({
       Port=>35008,
       MaxClients=>5000,
       Quiet=>1,
   });
 
-  $status = $s->bind();
+  my $status = $s->bind();
   print "Server started: $status";
 
   $s->addCallback('BROADCASTALL',\&msg_broadcast);
@@ -235,12 +235,12 @@ FUSE::Server - Perl-FUSE server
   sub msg_broadcast{
       my ($userid,$msg,$params) = @_;
       my @a = split /\//,$params;
-      $server->sendAll($a[1],$a[2]);
+      $s->sendAll($a[1],$a[2]);
   }
 
   sub msg_client_start{
       my ($userid,$msg,$params) = @_;
-      $server->send($sock,'SECRET_KEY','123 456 789');
+      $s->send($userid,'SECRET_KEY','123 456 789');
   }
 
   sub unknown_command{
@@ -309,6 +309,14 @@ This method shuts down the server gracefully. Since the C<start> method loops fo
 =item $s->start();
 
 This method invokes the server's internal message pump. This loop can only be broken by a signal.
+
+=item $s->send( $userid, $message, $params );
+
+This method sends a message to a single client.
+
+=item $s->sendAll( $message, $params );
+
+This method broadcasts a message to all clients.
 
 =back
 

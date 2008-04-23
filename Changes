@@ -18,3 +18,6 @@ Revision history for Perl extension FUSE::Server.
 1.18 Thu Apr 25 16:06:31 2002
 	- corrected POD (new method names!)
 
+1.19 Fri Jul 26 08:17:00 2002
+	- cleaned up documentation (send and sendAll methods)
+	- tested under strict and warnings
