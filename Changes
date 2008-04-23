@@ -1,5 +1,17 @@
 Revision history for Perl extension FUSE::Server.
 
-0.01  Mon May  7 12:24:26 2001
-	- original version; created by h2xs 1.19
+1.00  Mon May  7 12:24:26 2001
+	- original version. created by h2xs 1.19
+
+1.01  Mon May 14 14:24:53 2001
+	- fixed distribution zip. added pod documentation
+
+1.02  Sun May 20 14:47:39 2001
+	- fixed documentation
+
+1.16  Thu Apr 25 10:24:04 2002
+	- replaced core routines
+
+1.17  Thu Apr 25 14:24:25 2002
+	- fixed distro tar
 
