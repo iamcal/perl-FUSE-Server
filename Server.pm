@@ -1,22 +1,20 @@
 package FUSE::Server;
 
+require 5;
 use strict;
-use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
+
+use vars qw($VERSION @ISA @EXPORT);
 
 use IO::Socket;
 use IO::Select;
-use POSIX;
 
 require Exporter;
-require AutoLoader;
 
-@ISA = qw(Exporter AutoLoader);
+@ISA = qw(Exporter);
 @EXPORT = qw();
-$VERSION = '1.00';
+$VERSION = '1.14';
 
 my $nextid = 0;
-
-###################################################################
 
 sub new {
 	my ($class,$params) = @_;
@@ -25,27 +23,70 @@ sub new {
 	$self->{quiet} = ${$params}{Quiet};
 	$self->{port} = ${$params}{Port} || 1024;
 	$self->{maxc} = ${$params}{MaxClients} || SOMAXCONN;
+	$self->{max_msglen} = 1024;
+	$self->{server_sock} = 0;
+	$self->{sel} = 0;
 	$self->{users} = {};
 	return $self;
 }
 
-sub start{
+sub bind {
 	my ($self) = @_;
 
-	$self->{die_now} = 0;
+	$self->{server_sock} = IO::Socket::INET->new(Proto=>"tcp", LocalPort=>$self->{port}, Listen=>$self->{maxc}, Reuse=>1);
+	$self->{sel} = IO::Select->new($self->{server_sock});
 
-	$self->{main_sock} = IO::Socket::INET->new(LocalPort => $self->{port}, Type => SOCK_STREAM, Reuse => 1, Listen => $self->{maxc}) or die "Couldn't set up listening socket: $@\n";
-	fcntl($self->{main_sock},F_SETFL(),O_NONBLOCK());
+	return $self->{server_sock}->sockhost();
+}
 
-	$self->{readable_handles} = new IO::Select();
-	$self->{readable_handles}->add($self->{main_sock});
+sub start {
+	my ($self) = @_;
 
-	return "x.x.x.x";
+	while (my @ready = $self->{sel}->can_read) {
+
+		foreach my $client (@ready) {
+
+			if ($client == $self->{server_sock}) {
+
+				my $add = $client->accept;
+				$add->blocking(0);
+				$self->{sel}->add($add);
+				$self->newsession($add);
+			}else{
+
+				my ($in,$msg,$nread,$nsafe);
+
+				do {
+					$nread = sysread($client, $in, 1024);
+					$msg .= $in;
+					$nsafe = 0;
+					if (defined($nread)){
+						$nsafe = $nread;
+					}
+				} while ($nsafe == 1024);
+
+				if (defined($nread)) {
+					if ($nread == 0){
+						$self->{sel}->remove($client);
+						$self->endsession($client);
+						close($client);
+					}
+				}
+
+				if (defined($msg)){
+					if ($msg){
+						$self->incoming($client, $msg);
+					}
+				}
+			}
+		}
+	}
 }
 
 sub stop{
 	my ($self) = @_;
-	$self->_stop();
+
+	close($self->{server_sock});
 }
 
 sub addCallback{
@@ -58,42 +99,12 @@ sub defaultCallback{
 	$self->{def_callback} = $coderef;
 }
 
-sub die{
-	my ($self) = @_;
-	$self->{die_now} = 1;
-}
-
-sub run{
-	my ($self) = @_;
-	until($self->{die_now}){
-		my ($new_readable) = IO::Select->select($self->{readable_handles},undef,undef,undef);
-		for my $sock(@$new_readable){
-			if ($sock == $self->{main_sock}){
-				my $new_sock = $sock->accept();
-				fcntl($new_sock,F_SETFL(),O_NONBLOCK());
-				$self->{readable_handles}->add($new_sock);
-				$self->_newsession($new_sock);
-			}else{
-				my $buffer = <$sock>;
-				if ($buffer){
-					$self->_incoming($sock,$buffer);
-				}else{
-					$self->{readable_handles}->remove($sock);
-					$self->_sessionclosed($sock);
-					close($sock);
-				}
-			}
-		}
-	}
-	$self->_stop();
-}
-
 sub send{
 	my ($self,$uid,$msg,$params) = @_;
-	my $sock;
+
 	for (keys %{$self->{users}}){
-		if ($self->{users}{$_}{id}==$uid){
-			$sock = $self->{users}{$_}{sock};
+		if ($self->{users}{$_}{id} == $uid){
+			my $sock = $self->{users}{$_}{sock};
 			print $sock "# $msg\cM";
 			print $sock "$params\cM";
 			print $sock "##\cM\cJ";
@@ -109,47 +120,62 @@ sub sendAll{
 	}
 }
 
-###################################################################
 
-sub _stop{
-	my ($self) = @_;
-	close($self->{main_sock});
-}
+##########
 
-sub _newsession{
+sub newsession {
 	my ($self,$sock) = @_;
 	$nextid++;
 	$self->{users}{$sock}{sock} = $sock;
+	$self->{users}{$sock}{host} = $sock->peerhost;
 	$self->{users}{$sock}{id} = $nextid;
 	$self->{users}{$sock}{buffer} = '';
-	print "New Connection: c$nextid...\n" unless ($self->{quiet});
-	$self->_packet($sock,'client_start','');
+
+	unless ($self->{quiet}){
+		print "new connection: ";
+		print $self->{users}{$sock}{id};
+		print " (";
+		print $self->{users}{$sock}{host};
+		print ")\n";
+	}
+
+	$self->packet($sock, 'client_start', '');
 }
 
-sub _sessionclosed{
+sub endsession {
 	my ($self,$sock) = @_;
-	my $id = $self->{users}{$sock}{id};
-	print "Connection Closed: c$id...\n" unless ($self->{quiet});
-	$self->_packet($sock,'client_stop','');
-	delete $self->{users}{$sock}; #do this AFTER we've called _packet else we redefine $sock as a key
+
+	unless ($self->{quiet}){
+		print "connection closed: ";
+		print $self->{users}{$sock}{id};
+		print "\n";
+	}
+
+	$self->packet($sock, 'client_stop', '');
+
+	delete $self->{users}{$sock};
 }
 
-sub _incoming{
+sub incoming{
 	my ($self,$sock,$data) = @_;
+
 	my $id = $self->{users}{$sock}{id};
 	$self->{users}{$sock}{buffer} .= $data;
+
 	my $ok = 1;
 	my $buffer = $self->{users}{$sock}{buffer};
 	while ($ok){
 		$ok = 0;
 		if (length($buffer) > 4){
 			my $size = substr($buffer,0,4);
-			if (length($buffer) >= 4+$size){
+			$size =~ s/[^0-9]//g;
+			$size += 0;
+			if (length($buffer) >= 4 + $size){
 				my $packet = substr($buffer,4,$size);
 				my $a = index($packet,' ');
 				my $msg = substr($packet,0,$a);
 				my $param = substr($packet,$a+1);
-				$self->_packet($sock,$msg,$param);
+				$self->packet($sock,$msg,$param);
 				$buffer = substr($buffer,4+$size);
 				$ok=1;
 			}
@@ -158,21 +184,24 @@ sub _incoming{
 	$self->{users}{$sock}{buffer} = $buffer;
 }
 
-sub _packet{
+sub packet {
 	my ($self,$sock,$msg,$params) = @_;
-	my $id = $self->{users}{$sock}{id};
-	print "Message: $msg (c$id)...\n" unless ($self->{quiet});
+
+	my $uid = $self->{users}{$sock}{id};
+
+	unless($self->{quiet}){
+		print "packet sent to $uid: $msg\n";
+	}
 
 	if ($self->{callbacks}{$msg}){
-		&{$self->{callbacks}{$msg}}($id,$msg,$params);
+		&{$self->{callbacks}{$msg}}($uid,$msg,$params);
 	}else{
 		if ($self->{def_callback}){
-			&{$self->{def_callback}}($id,$msg,$params);
+			&{$self->{def_callback}}($uid,$msg,$params);
 		}
 	}
 }
 
-###################################################################
 
 1;
 __END__
@@ -184,22 +213,24 @@ FUSE::Server - Perl-FUSE server
 =head1 SYNOPSIS
 
   use FUSE::Server;
-  $server = FUSE::Server->new({
+  $s = FUSE::Server->new({
       Port=>35008,
       MaxClients=>5000,
       Quiet=>1,
   });
 
-  $status = $server->start();
+  $status = $s->start();
   print "Server started: $status";
 
-  $server->addCallback('BROADCASTALL',\&msg_broadcast);
+  $s->addCallback('BROADCASTALL',\&msg_broadcast);
 
-  $server->addCallback('client_start',\&msg_client_start);
+  $s->addCallback('client_start',\&msg_client_start);
 
-  $server->defaultCallback(\&unknown_command);
+  $s->defaultCallback(\&unknown_command);
 
-  $SIG{INT} = $SIG{TERM} = $SIG{HUP} = sub{$server->die();};
+  $SIG{INT} = $SIG{TERM} = $SIG{HUP} = sub{$s->die();};
+
+  $s->run();
 
   sub msg_broadcast{
       my ($userid,$msg,$params) = @_;
@@ -220,16 +251,69 @@ FUSE::Server - Perl-FUSE server
 
 =head1 DESCRIPTION
 
-Lorem ipsum dolor sit amet, consectetuer adipiscing elit, sed diam nonummy
-nibh euismod tincidunt ut laoreet dolore magna aliquam erat volutpat. Ut
-wisi enim ad minim veniam, quis nostrud exerci tation ullamcorper suscipit
-lobortis nisl ut aliquip ex ea ccommodo consequat. Duis autem vel eum iriure
-dolor in hendrerit in vulputate velit esse molestie consequat, vel illum
-dolore eu feugiat nulla facilisis at vero eros et accumsan et iusto odio
-dignissim qui blandit praesent luptatum zzril delenit augue duis
+The C<FUSE::Server> module will create a TCP FUSE server and dispatch messages to registered event handlers.
+
+The external interface to C<FUSE::Server> is:
+
+=over 4
+
+=item $s = FUSE::Server->new( [%options] );
+
+The object constructor takes the following arguments in the options hash:
+
+B<Quiet = 0|1>
+
+Whether to be quiet. Default is to report all events to STDOUT (not 'Quiet').
+
+B<Port = n>
+
+The port for the server to listen on. Default is 1024.
+
+B<MaxClients = n>
+
+Maximum incoming connections to allow. Default is SOMAXCONN.
+
+
+=item $s->bind();
+
+This method starts the server listening on it's port and returns the IP which it is listening on.
+
+
+=item $s->addCallback( $message, $coderef );
+
+This method registers the referenced subroutine as a handler for the specified message. When the server receives that message from the client, it checks it's handler hash and dispatches the decoded message to the sub. The sub should handle the following arguments:
+
+C<( $userid, $msg, $params )>
+
+$userid contains the internal connection id for the client session. You can use this id to associate logins with clients. The $msg parameter contains the message the client sent. This allows one routine to handle more than one message. Messages from clients are typically uppercase, with lowercase messages being reserved for internal server events, such as client connect/disconnect. The available internal messages are:
+
+B<client_start>
+
+This message is sent when a client first connects. It is typically used to issue a I<SECRET_KEY> message to the client.
+
+B<client_stop>
+
+This message is sent when a client disconnects.
+
+
+=item $s->defaultCallback( $coderef );
+
+For all messages without an assigned handler, the default handler (if set) is sent the message. If you'd like to handle all messages internally, then setup C<defaultCallback> without setting up any normal C<addCallback>'s.
+
+
+=item $s->stop();
+
+This method shuts down the server gracefully. Since the C<start> method loops forever, the C<stop> method is generally set up to run on a signal.
+
+
+=item $s->start();
+
+This method invokes the server's internal message pump. This loop can only be broken by a signal.
+
+=back
 
 =head1 AUTHOR
 
-Cal Henderson, cal@iamcal.com
+Cal Henderson, <cal@iamcal.com>
 
 =cut
